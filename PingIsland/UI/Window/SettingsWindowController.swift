@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    static let settingsWindowVisibilityDidChange = Notification.Name("settingsWindowVisibilityDidChange")
+}
+
+enum SettingsWindowVisibilityNotification {
+    static let isVisibleKey = "isVisible"
+}
+
 final class SettingsPanelWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -82,15 +90,33 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        publishVisibilityDidChange(isVisible: true)
     }
 
     func dismiss() {
         window?.orderOut(nil)
+        publishVisibilityDidChange(isVisible: false)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         dismiss()
         return false
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        publishVisibilityDidChange(isVisible: false)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        publishVisibilityDidChange(isVisible: window?.isVisible == true)
+    }
+
+    private func publishVisibilityDidChange(isVisible: Bool) {
+        NotificationCenter.default.post(
+            name: .settingsWindowVisibilityDidChange,
+            object: self,
+            userInfo: [SettingsWindowVisibilityNotification.isVisibleKey: isVisible]
+        )
     }
 }
 

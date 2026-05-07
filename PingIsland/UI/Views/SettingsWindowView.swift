@@ -163,17 +163,22 @@ final class SettingsPanelViewModel: ObservableObject {
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
     private let qoderCLIHookRefreshStatusProvider: @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus?
     private let qoderCLIHookRefreshNoticeGate: QoderCLIHookRefreshNoticeGate
+    private let accessibilityStatusProvider: @MainActor () -> Bool
 
     init(
         qoderCLIHookRefreshStatusProvider: @escaping @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus? = {
             HookInstaller.qoderCLIHookRefreshStatus()
         },
-        qoderCLIHookRefreshNoticeDefaults: UserDefaults = .standard
+        qoderCLIHookRefreshNoticeDefaults: UserDefaults = .standard,
+        accessibilityStatusProvider: @escaping @MainActor () -> Bool = {
+            AXIsProcessTrusted()
+        }
     ) {
         self.qoderCLIHookRefreshStatusProvider = qoderCLIHookRefreshStatusProvider
         qoderCLIHookRefreshNoticeGate = QoderCLIHookRefreshNoticeGate(
             defaults: qoderCLIHookRefreshNoticeDefaults
         )
+        self.accessibilityStatusProvider = accessibilityStatusProvider
     }
 
     var visibleHookProfiles: [ManagedHookClientProfile] {
@@ -208,10 +213,14 @@ final class SettingsPanelViewModel: ObservableObject {
         refreshCustomHookInstallations()
         refreshQoderCLIHookRefreshStatus()
         refreshClosedNotchUsageAvailability()
-        accessibilityEnabled = AXIsProcessTrusted()
+        refreshAccessibilityStatus()
         ScreenSelector.shared.refreshScreens()
         SoundPackCatalog.shared.refresh()
         refreshLocalizedState()
+    }
+
+    func refreshAccessibilityStatus() {
+        accessibilityEnabled = accessibilityStatusProvider()
     }
 
     func refreshLocalizedState() {
@@ -428,6 +437,7 @@ final class SettingsPanelViewModel: ObservableObject {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
             return
         }
+        refreshAccessibilityStatus()
         NSWorkspace.shared.open(url)
     }
 
@@ -575,6 +585,7 @@ private struct SettingsPanelContentView: View {
     @State private var showingRemoteHostSheet = false
     @State private var remotePasswordPromptRequest: RemotePasswordPromptRequest?
     @State private var consecutiveGeneralTapCount = 0
+    @State private var isAccessibilityPollingActive = false
 
     var body: some View {
         ZStack {
@@ -607,6 +618,29 @@ private struct SettingsPanelContentView: View {
         .onAppear {
             viewModel.refresh()
             ensureValidSelectedSoundPack()
+            isAccessibilityPollingActive = true
+        }
+        .onDisappear {
+            isAccessibilityPollingActive = false
+        }
+        .task(id: isAccessibilityPollingActive) {
+            guard isAccessibilityPollingActive else { return }
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                viewModel.refreshAccessibilityStatus()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .settingsWindowVisibilityDidChange)) { notification in
+            guard presentation == .window,
+                  let isVisible = notification.userInfo?[SettingsWindowVisibilityNotification.isVisibleKey] as? Bool else {
+                return
+            }
+
+            isAccessibilityPollingActive = isVisible
+            if isVisible {
+                viewModel.refreshAccessibilityStatus()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             viewModel.refresh()

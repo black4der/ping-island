@@ -79,6 +79,32 @@ final class SettingsWindowControllerTests: XCTestCase {
         controller.dismiss()
     }
 
+    func testSettingsWindowPublishesVisibilityChanges() {
+        let controller = SettingsWindowController.shared
+        controller.dismiss()
+
+        var visibilityChanges: [Bool] = []
+        let observer = NotificationCenter.default.addObserver(
+            forName: .settingsWindowVisibilityDidChange,
+            object: controller,
+            queue: nil
+        ) { notification in
+            guard let isVisible = notification.userInfo?[SettingsWindowVisibilityNotification.isVisibleKey] as? Bool else {
+                return
+            }
+            visibilityChanges.append(isVisible)
+        }
+        defer {
+            NotificationCenter.default.removeObserver(observer)
+            controller.dismiss()
+        }
+
+        controller.present()
+        controller.dismiss()
+
+        XCTAssertEqual(visibilityChanges, [true, false])
+    }
+
     func testPresentationModeWelcomeWindowStaysVisibleUntilCompleted() throws {
         let controller = PresentationModeWelcomeWindowController.shared
         controller.dismiss()
