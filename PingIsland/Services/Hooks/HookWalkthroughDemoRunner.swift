@@ -12,6 +12,8 @@ final class HookWalkthroughDemoRunner {
     static let shared = HookWalkthroughDemoRunner()
 
     static let metadataSource = "ping_island_hook_walkthrough_demo"
+    private static let completionDismissDelay: TimeInterval = 7
+    private static let demoSessionCleanupDelayNanoseconds: UInt64 = 7_300_000_000
 
     private init() {}
 
@@ -86,7 +88,12 @@ final class HookWalkthroughDemoRunner {
             ))
 
             await SessionStore.shared.process(.desktopTurnCompleted(sessionId: sessionId))
-            HookWalkthroughDemoBackdropWindowController.shared.dismiss(after: 7)
+            HookWalkthroughDemoBackdropWindowController.shared.dismiss(after: Self.completionDismissDelay)
+
+            try? await Task.sleep(nanoseconds: Self.demoSessionCleanupDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
         }
     }
 
