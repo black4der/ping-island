@@ -7,27 +7,35 @@ confirms consent during first-run onboarding or later in Settings. The
 
 ## SLS Configuration
 
-The first SLS target uses:
+Source builds keep telemetry disabled unless a complete SLS target is provided.
+Release builds should inject the SLS target from GitHub Actions secrets:
 
-- Project: `ping-island-global`
-- Logstore: `ping-island`
-- Topic: `product-telemetry`
-- Source: `ping-island-macos`
+- `PING_ISLAND_TELEMETRY_SLS_HOST`
+- `PING_ISLAND_TELEMETRY_SLS_PROJECT`
+- `PING_ISLAND_TELEMETRY_SLS_LOGSTORE`
 
-Set the SLS region endpoint host in `Config/LocalSecrets.xcconfig`:
+For local release testing, set the same three values in
+`Config/LocalSecrets.xcconfig`:
 
 ```xcconfig
 PING_ISLAND_TELEMETRY_SLS_HOST = ap-southeast-1.log.aliyuncs.com
+PING_ISLAND_TELEMETRY_SLS_PROJECT = ping-island-global
+PING_ISLAND_TELEMETRY_SLS_LOGSTORE = ping-island
 ```
 
 Use the endpoint for the region where the `ping-island` project was created.
 The console URL contains the project and logstore names, but not the region
 endpoint.
 
+Topic and source remain non-secret build defaults:
+
+- Topic: `product-telemetry`
+- Source: `ping-island-macos`
+
 The app writes with SLS WebTracking batch upload:
 
 ```text
-POST https://ping-island-global.<region>.log.aliyuncs.com/logstores/ping-island/track
+POST https://<project>.<region>.log.aliyuncs.com/logstores/<logstore>/track
 ```
 
 The target Logstore must have WebTracking enabled before client uploads are

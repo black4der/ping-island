@@ -121,6 +121,9 @@ jobs:
           SPARKLE_APPCAST_URL: ${{ secrets.SPARKLE_APPCAST_URL }}
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          PING_ISLAND_TELEMETRY_SLS_HOST: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_HOST }}
+          PING_ISLAND_TELEMETRY_SLS_PROJECT: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_PROJECT }}
+          PING_ISLAND_TELEMETRY_SLS_LOGSTORE: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_LOGSTORE }}
         shell: bash
         run: |
           set -euo pipefail
@@ -164,6 +167,29 @@ jobs:
             echo "sparkle_enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
+          telemetry_names=(
+            PING_ISLAND_TELEMETRY_SLS_HOST
+            PING_ISLAND_TELEMETRY_SLS_PROJECT
+            PING_ISLAND_TELEMETRY_SLS_LOGSTORE
+          )
+          telemetry_count=0
+          for name in "${telemetry_names[@]}"; do
+            if [ -n "${!name:-}" ]; then
+              telemetry_count=$((telemetry_count + 1))
+            fi
+          done
+
+          if [ "$telemetry_count" -ne 0 ] && [ "$telemetry_count" -ne "${#telemetry_names[@]}" ]; then
+            echo "::error::PING_ISLAND_TELEMETRY_SLS_HOST, PING_ISLAND_TELEMETRY_SLS_PROJECT, and PING_ISLAND_TELEMETRY_SLS_LOGSTORE must all be set together"
+            exit 1
+          fi
+
+          if [ "$telemetry_count" -eq "${#telemetry_names[@]}" ]; then
+            echo "telemetry_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "telemetry_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Import Developer ID certificate
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
@@ -191,24 +217,51 @@ jobs:
           security list-keychains -d user -s "$keychain_path" $existing_keychains
           security find-identity -v -p codesigning "$keychain_path"
 
-      - name: Inject Sparkle release config
+      - name: Inject release config
         shell: bash
         env:
           SPARKLE_APPCAST_URL: ${{ secrets.SPARKLE_APPCAST_URL }}
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          PING_ISLAND_TELEMETRY_SLS_HOST: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_HOST }}
+          PING_ISLAND_TELEMETRY_SLS_PROJECT: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_PROJECT }}
+          PING_ISLAND_TELEMETRY_SLS_LOGSTORE: ${{ secrets.PING_ISLAND_TELEMETRY_SLS_LOGSTORE }}
         run: |
           set -euo pipefail
 
-          if [ -z "${SPARKLE_APPCAST_URL:-}" ] || [ -z "${SPARKLE_PUBLIC_ED_KEY:-}" ]; then
-            echo "Sparkle release config not provided; skipping LocalSecrets.xcconfig injection."
+          local_secrets="Config/LocalSecrets.xcconfig"
+          wrote_config=false
+          : > "$local_secrets"
+
+          if [ -n "${SPARKLE_APPCAST_URL:-}" ] && [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]; then
+            printf '_XC_SLASH = /\nSPARKLE_APPCAST_URL = %s$(_XC_SLASH)/%s\nSPARKLE_PUBLIC_ED_KEY = %s\n' \
+              "${SPARKLE_APPCAST_URL%%//*}" \
+              "${SPARKLE_APPCAST_URL#*//}" \
+              "$SPARKLE_PUBLIC_ED_KEY" \
+              >> "$local_secrets"
+            wrote_config=true
+          fi
+
+          if [ -n "${PING_ISLAND_TELEMETRY_SLS_HOST:-}" ] &&
+             [ -n "${PING_ISLAND_TELEMETRY_SLS_PROJECT:-}" ] &&
+             [ -n "${PING_ISLAND_TELEMETRY_SLS_LOGSTORE:-}" ]; then
+            if [ "$wrote_config" = "true" ]; then
+              printf '\n' >> "$local_secrets"
+            fi
+            printf 'PING_ISLAND_TELEMETRY_SLS_HOST = %s\nPING_ISLAND_TELEMETRY_SLS_PROJECT = %s\nPING_ISLAND_TELEMETRY_SLS_LOGSTORE = %s\n' \
+              "$PING_ISLAND_TELEMETRY_SLS_HOST" \
+              "$PING_ISLAND_TELEMETRY_SLS_PROJECT" \
+              "$PING_ISLAND_TELEMETRY_SLS_LOGSTORE" \
+              >> "$local_secrets"
+            wrote_config=true
+          fi
+
+          if [ "$wrote_config" != "true" ]; then
+            rm -f "$local_secrets"
+            echo "Release config not provided; skipping LocalSecrets.xcconfig injection."
             exit 0
           fi
 
-          printf '_XC_SLASH = /\nSPARKLE_APPCAST_URL = %s$(_XC_SLASH)/%s\nSPARKLE_PUBLIC_ED_KEY = %s\n' \
-            "${SPARKLE_APPCAST_URL%%//*}" \
-            "${SPARKLE_APPCAST_URL#*//}" \
-            "$SPARKLE_PUBLIC_ED_KEY" \
-            > Config/LocalSecrets.xcconfig
+          echo "Injected release-only configuration into LocalSecrets.xcconfig."
 
       - name: Write Sparkle private key
         id: sparkle_private_key
